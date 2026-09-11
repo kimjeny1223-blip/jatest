@@ -1,0 +1,1786 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>자이로 볼 오디세이 - Gyro Ball Odyssey</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Pretendard:wght@400;600;800&display=swap');
+
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            font-family: 'Pretendard', system-ui, -apple-system, sans-serif;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        body {
+            background-color: #0b0f19;
+            color: #f3f4f6;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #game-board-wrapper {
+            perspective: 800px;
+            transform-style: preserve-3d;
+        }
+
+        canvas {
+            display: block;
+            touch-action: none;
+            will-change: transform;
+            transition: transform 0.08s ease-out;
+        }
+
+        /* Glassmorphism background */
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.88);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* Bubble level animation */
+        .level-dot {
+            transition: transform 0.05s ease-out;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center relative select-none">
+
+    <!-- Main Game Container -->
+    <div id="game-container" class="relative w-full h-full max-w-md mx-auto flex flex-col justify-between overflow-hidden shadow-2xl">
+        
+        <!-- 3D Wrapper for Game Canvas -->
+        <div id="game-board-wrapper" class="absolute inset-0 w-full h-full z-0 flex items-center justify-center">
+            <canvas id="gameCanvas" class="w-full h-full"></canvas>
+        </div>
+
+        <!-- HUD Header Overlay -->
+        <div id="hud-header" class="relative z-10 p-4 flex justify-between items-center pointer-events-none opacity-0 transition-opacity duration-300">
+            <!-- Stage & Gems -->
+            <div class="glass-panel px-3 py-1.5 rounded-full flex items-center space-x-2 border border-cyan-500/30">
+                <span id="hud-level-tag" class="text-xs font-bold text-cyan-400 font-orbitron">STAGE 01</span>
+                <span class="text-gray-500 text-xs">|</span>
+                <div class="flex items-center text-amber-400 text-xs font-bold">
+                    <i class="fa-solid fa-gem mr-1"></i>
+                    <span id="hud-gems">0/0</span>
+                </div>
+            </div>
+
+            <!-- Sensor Status Tag (Gyro Pure Mode) -->
+            <div class="glass-panel px-3 py-1.5 rounded-full font-orbitron text-xs font-bold text-cyan-300 border border-cyan-500/40 flex items-center space-x-1.5">
+                <i class="fa-solid fa-mobile-screen text-cyan-400"></i>
+                <span>PURE GYRO MODE</span>
+            </div>
+
+            <!-- Timer -->
+            <div class="glass-panel px-3 py-1.5 rounded-full font-orbitron text-xs font-bold text-white border border-purple-500/30">
+                <i class="fa-solid fa-clock text-purple-400 mr-1"></i>
+                <span id="hud-timer">00:00</span>
+            </div>
+
+            <!-- Top Right Action Controls -->
+            <div class="flex items-center space-x-2 pointer-events-auto">
+                <button id="btn-calibrate" class="glass-panel w-9 h-9 rounded-full flex items-center justify-center text-cyan-400 hover:text-white active:scale-95 transition" title="수평 교정">
+                    <i class="fa-solid fa-compass"></i>
+                </button>
+                <button id="btn-pause" class="glass-panel w-9 h-9 rounded-full flex items-center justify-center text-gray-300 hover:text-white active:scale-95 transition">
+                    <i class="fa-solid fa-pause"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sensor Tilt Indicator & Diagnostics (Bottom HUD) -->
+        <div id="hud-bottom" class="relative z-10 p-4 flex justify-between items-end pointer-events-none opacity-0 transition-opacity duration-300">
+            <!-- Gyro Tilt Visualizer Level -->
+            <div class="glass-panel p-2.5 rounded-2xl flex items-center space-x-3 border border-slate-700/50">
+                <div class="relative w-10 h-10 rounded-full border border-cyan-500/40 flex items-center justify-center bg-slate-900/50 overflow-hidden">
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div class="w-full h-[1px] bg-cyan-500/20"></div>
+                        <div class="absolute h-full w-[1px] bg-cyan-500/20"></div>
+                    </div>
+                    <!-- Moving Dot representing tilt -->
+                    <div id="level-bubble" class="w-3 h-3 bg-cyan-400 rounded-full shadow-[0_0_8px_#06b6d4] level-dot"></div>
+                </div>
+                <div class="text-[10px] text-gray-400 font-mono">
+                    <div>X: <span id="val-gamma" class="text-cyan-300 font-bold">0°</span> | Y: <span id="val-beta" class="text-purple-300 font-bold">0°</span></div>
+                    <div>센서 신호: <span id="val-count" class="text-amber-300 font-bold">0회</span></div>
+                    <div id="sensor-active-label" class="text-[9px] text-cyan-400 font-sans mt-0.5">자이로 센서 준비중</div>
+                </div>
+            </div>
+
+            <!-- Recalibrate Prompt -->
+            <div class="glass-panel px-3 py-2 rounded-xl text-[10px] text-gray-300 text-right pointer-events-auto">
+                <i class="fa-solid fa-rotate-right text-cyan-400 mr-1"></i>
+                <span>기기를 평평하게 들고 시작하세요</span>
+            </div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="screen-start" class="absolute inset-0 z-20 glass-panel flex flex-col items-center justify-between p-6 text-center">
+            <div class="w-full pt-6 flex flex-col items-center">
+                <div class="w-20 h-20 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 mb-4 animate-bounce">
+                    <i class="fa-solid fa-mobile-screen-button text-4xl text-white"></i>
+                </div>
+                <h1 class="text-3xl font-black font-orbitron text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-purple-400 mb-1">
+                    GYRO BALL
+                </h1>
+                <p class="text-xs text-cyan-200/80 font-medium tracking-widest uppercase mb-4">순수 스마트폰 자이로 모션 조작</p>
+                
+                <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-700/60 text-left w-full max-w-xs text-xs space-y-2 text-gray-300">
+                    <div class="flex items-center space-x-2.5">
+                        <i class="fa-solid fa-mobile text-cyan-400 text-sm w-4"></i>
+                        <span>핸드폰을 <b>좌우/상하로 기울이면</b> 공이 반응합니다.</span>
+                    </div>
+                    <div class="flex items-center space-x-2.5">
+                        <i class="fa-solid fa-compass text-amber-400 text-sm w-4"></i>
+                        <span>시작 시 현재 들고 있는 각도가 <b>영점(수평)</b>으로 자동 교정됩니다.</span>
+                    </div>
+                </div>
+
+                <!-- Environment Diagnostics & Gyro Requirements Box -->
+                <div id="env-diagnosis-box" class="mt-3 p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30 text-[11px] text-left w-full max-w-xs space-y-1.5">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-1">
+                        <span class="font-bold text-cyan-400"><i class="fa-solid fa-stethoscope mr-1"></i>기기 자이로 환경 진단</span>
+                        <span id="diag-status" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">검사중</span>
+                    </div>
+                    <div class="text-gray-300 space-y-1 text-[10.5px]">
+                        <div class="flex justify-between">
+                            <span>• 보안 연결(HTTPS):</span>
+                            <span id="diag-https" class="font-mono font-bold">확인중</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>• 브라우저 종류:</span>
+                            <span id="diag-browser" class="font-mono font-bold">확인중</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>• iOS 권한 API:</span>
+                            <span id="diag-ios" class="font-mono font-bold">확인중</span>
+                        </div>
+                    </div>
+                    <p id="diag-warning" class="text-[10px] text-amber-300 mt-1 hidden border-t border-amber-500/20 pt-1">
+                        ⚠️ 인앱 브라우저나 HTTP 환경에서는 자이로 센서가 동작하지 않습니다. Safari/Chrome으로 접속해주세요.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="w-full max-w-xs space-y-3 pb-4">
+                <button id="btn-enable-gyro" class="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 font-bold text-white text-base shadow-lg shadow-cyan-500/30 active:scale-95 transition flex items-center justify-center space-x-2 cursor-pointer">
+                    <i class="fa-solid fa-compass text-lg"></i>
+                    <span>자이로 센서 승인 및 시작</span>
+                </button>
+                <button id="btn-copy-url" class="w-full py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-cyan-300 text-xs font-medium active:scale-95 transition flex items-center justify-center space-x-1">
+                    <i class="fa-regular fa-copy"></i>
+                    <span>URL 복사 (Safari / Chrome에 붙여넣기)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sensor Tilt Indicator & Controls Guide (Bottom HUD) -->
+        <div id="hud-bottom" class="relative z-10 p-4 flex justify-between items-end pointer-events-none opacity-0 transition-opacity duration-300">
+            <!-- Gyro Tilt Visualizer Level -->
+            <div class="glass-panel p-2 rounded-2xl flex items-center space-x-3 border border-slate-700/50">
+                <div class="relative w-10 h-10 rounded-full border border-cyan-500/40 flex items-center justify-center bg-slate-900/50 overflow-hidden">
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div class="w-full h-[1px] bg-cyan-500/20"></div>
+                        <div class="absolute h-full w-[1px] bg-cyan-500/20"></div>
+                    </div>
+                    <!-- Moving Dot representing tilt -->
+                    <div id="level-bubble" class="w-3 h-3 bg-cyan-400 rounded-full shadow-[0_0_8px_#06b6d4] level-dot"></div>
+                </div>
+                <div class="text-[10px] text-gray-400 font-mono">
+                    <div>X: <span id="val-gamma" class="text-cyan-300 font-bold">0°</span> | Y: <span id="val-beta" class="text-purple-300 font-bold">0°</span></div>
+                    <div>이벤트: <span id="val-count" class="text-amber-300 font-bold">0회</span></div>
+                    <div id="sensor-active-label" class="text-[9px] text-emerald-400 font-sans mt-0.5">센서 진단중...</div>
+                </div>
+            </div>
+
+            <!-- Control Hint Banner -->
+            <div id="control-hint-msg" class="glass-panel px-3 py-2 rounded-xl text-[10px] text-gray-300 max-w-[170px] text-right pointer-events-auto">
+                <i class="fa-solid fa-hand-pointer text-cyan-400 mr-1"></i>
+                <span id="hint-text">기울기 감지 또는 화면 드래그</span>
+            </div>
+        </div>
+
+        <!-- Sensor Warning Banner Modal -->
+        <div id="sensor-warning-banner" class="absolute top-16 left-4 right-4 z-30 glass-panel p-3 rounded-xl border border-amber-500/50 bg-amber-950/90 text-amber-200 text-xs flex flex-col space-y-2 hidden">
+            <div class="flex items-start space-x-2">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 text-base mt-0.5"></i>
+                <div class="flex-1">
+                    <p id="warning-text" class="font-semibold text-white">모바일 브라우저 센서 제한 감지</p>
+                    <p class="text-[11px] text-amber-200/90 mt-0.5">
+                        카카오톡/네이버 내장 브라우저나 일부 보안 환경에서는 자이로 센서가 차단될 수 있습니다. 
+                        <b>Safari / Chrome</b> 등 기본 브라우저에서 열거나 아래 <b>터치 조이스틱</b>으로 바로 플레이하세요!
+                    </p>
+                </div>
+                <button id="btn-close-warning" class="text-amber-300 font-bold px-1.5 py-0.5 hover:text-white">✕</button>
+            </div>
+            <div class="flex space-x-2 pt-1">
+                <button id="btn-copy-url" class="flex-1 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[11px] font-bold active:scale-95 transition flex items-center justify-center space-x-1">
+                    <i class="fa-regular fa-copy"></i>
+                    <span>URL 복사 (기본 브라우저로 열기)</span>
+                </button>
+                <button id="btn-switch-touch" class="flex-1 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-[11px] font-bold active:scale-95 transition flex items-center justify-center space-x-1">
+                    <i class="fa-solid fa-gamepad"></i>
+                    <span>터치 조이스틱 사용</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- On-Screen Virtual Joystick for Mobile Fallback -->
+        <div id="virtual-joystick-container" class="absolute bottom-6 left-6 z-20 pointer-events-auto hidden">
+            <div id="joystick-base" class="w-24 h-24 rounded-full bg-slate-900/60 border-2 border-cyan-500/40 backdrop-blur-md relative flex items-center justify-center shadow-lg">
+                <div id="joystick-stick" class="w-10 h-10 rounded-full bg-cyan-400/80 border border-white shadow-[0_0_12px_#06b6d4] absolute transition-transform duration-75"></div>
+            </div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="screen-start" class="absolute inset-0 z-20 glass-panel flex flex-col items-center justify-between p-6 text-center">
+            <div class="w-full pt-8 flex flex-col items-center">
+                <div class="w-20 h-20 rounded-2xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 mb-4 animate-bounce">
+                    <i class="fa-solid fa-mobile-screen-button text-4xl text-white"></i>
+                </div>
+                <h1 class="text-3xl font-black font-orbitron text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-purple-400 mb-1">
+                    GYRO BALL
+                </h1>
+                <p class="text-xs text-cyan-200/80 font-medium tracking-widest uppercase mb-6">스마트폰 자이로 3D 미로 액션</p>
+                
+                <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-700/60 text-left w-full max-w-xs text-xs space-y-2.5 text-gray-300">
+                    <div class="flex items-center space-x-2.5">
+                        <i class="fa-solid fa-rotate text-cyan-400 text-sm w-4"></i>
+                        <span>핸드폰을 <b>좌우/상하로 기울이면</b> 공이 이동합니다.</span>
+                    </div>
+                    <div class="flex items-center space-x-2.5">
+                        <i class="fa-solid fa-hand-touch text-amber-400 text-sm w-4"></i>
+                        <span>화면을 <b>드래그하거나 방향키로도</b> 조작할 수 있습니다.</span>
+                    </div>
+                    <div class="flex items-center space-x-2.5">
+                        <i class="fa-solid fa-gem text-amber-400 text-sm w-4"></i>
+                        <span>보석을 모두 수집하고 <b>포탈(목적지)</b>로 이동하세요.</span>
+                    </div>
+                </div>
+
+                <!-- Sensor Environment Notice -->
+                <div class="mt-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 text-left w-full max-w-xs space-y-1">
+                    <i class="fa-solid fa-shield-halved mr-1 text-amber-400"></i>
+                    <b>모바일 접속 안내:</b>
+                    <div class="text-gray-300 text-[10.5px] leading-relaxed">
+                        • <b>iOS Safari / Chrome:</b> 접속 시 권한 승인 버튼을 누르면 자이로가 작동합니다.<br>
+                        • <b>카카오톡 / 네이버 내장 브라우저:</b> 센서가 제한될 경우 오른쪽 상단 메뉴에서 <b>'다른 브라우저로 열기'</b>를 선택해주세요.<br>
+                        • 터치 드래그 및 화면 내 조이스틱으로도 완벽하게 조종 가능합니다!
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="w-full max-w-xs space-y-3 pb-6">
+                <button id="btn-enable-gyro" class="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 font-bold text-white text-base shadow-lg shadow-cyan-500/30 active:scale-95 transition flex items-center justify-center space-x-2 cursor-pointer">
+                    <i class="fa-solid fa-play text-lg"></i>
+                    <span>게임 시작하기</span>
+                </button>
+                <p id="sensor-status-msg" class="text-[11px] text-gray-400">
+                    <i class="fa-solid fa-circle-info mr-1"></i>기울기 센서 및 터치 드래그를 지원합니다.
+                </p>
+            </div>
+        </div>
+
+        <!-- Stage Select Screen Modal -->
+        <div id="screen-stage-select" class="absolute inset-0 z-20 glass-panel flex flex-col p-6 hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold font-orbitron text-cyan-400">STAGE SELECT</h2>
+                <button id="btn-close-stage-select" class="text-gray-400 hover:text-white p-2">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Stage Grid -->
+            <div id="stage-grid-container" class="flex-1 overflow-y-auto grid grid-cols-3 gap-3 pr-1">
+                <!-- Dynamically populated stages -->
+            </div>
+        </div>
+
+        <!-- Pause Modal -->
+        <div id="modal-pause" class="absolute inset-0 z-30 glass-panel flex flex-col items-center justify-center p-6 hidden">
+            <div class="bg-slate-900/90 border border-slate-700 p-6 rounded-2xl w-full max-w-xs text-center space-y-4 shadow-2xl">
+                <h3 class="text-2xl font-black font-orbitron text-cyan-400">PAUSED</h3>
+                <div class="space-y-2 py-2">
+                    <button id="btn-resume" class="w-full py-3 rounded-xl bg-cyan-500 font-bold text-slate-900 hover:bg-cyan-400 transition">
+                        이어서 하기
+                    </button>
+                    <button id="btn-recalibrate" class="w-full py-3 rounded-xl bg-slate-800 text-cyan-300 font-semibold border border-cyan-500/30 hover:bg-slate-700 transition">
+                        <i class="fa-solid fa-compass mr-1.5"></i>자이로 수평 재정렬
+                    </button>
+                    <button id="btn-restart" class="w-full py-3 rounded-xl bg-slate-800 text-gray-200 font-semibold hover:bg-slate-700 transition">
+                        다시 시작
+                    </button>
+                    <button id="btn-menu" class="w-full py-3 rounded-xl bg-slate-800 text-rose-400 font-semibold hover:bg-slate-700 transition">
+                        스테이지 목록
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Modal -->
+        <div id="modal-result" class="absolute inset-0 z-30 glass-panel flex flex-col items-center justify-center p-6 hidden">
+            <div class="bg-slate-900/95 border border-slate-700 p-6 rounded-2xl w-full max-w-xs text-center space-y-4 shadow-2xl">
+                <div id="result-icon-box" class="w-16 h-16 rounded-full mx-auto flex items-center justify-center text-3xl">
+                    <i id="result-icon" class="fa-solid fa-trophy text-amber-400"></i>
+                </div>
+                
+                <h3 id="result-title" class="text-2xl font-black font-orbitron text-white">STAGE CLEAR!</h3>
+                <p id="result-subtitle" class="text-xs text-gray-400">성공적으로 포탈에 도착했습니다.</p>
+
+                <!-- Stats Box -->
+                <div class="bg-slate-800/80 rounded-xl p-3 text-xs space-y-1.5 text-gray-300 border border-slate-700/50">
+                    <div class="flex justify-between">
+                        <span>소요 시간</span>
+                        <span id="result-time" class="font-bold text-cyan-400">00:15</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>수집한 보석</span>
+                        <span id="result-gems" class="font-bold text-amber-400">3 / 3</span>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="w-full max-w-xs space-y-3 pb-6">
+                    <button id="btn-enable-gyro" class="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 font-bold text-white text-base shadow-lg shadow-cyan-500/30 active:scale-95 transition flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-compass text-lg"></i>
+                        <span>자이로 센서 승인 및 시작</span>
+                    </button>
+                    <p id="sensor-status-msg" class="text-[11px] text-cyan-300 font-medium">
+                        <i class="fa-solid fa-shield-halved mr-1"></i>버튼 클릭 시 브라우저 권한 팝업(동작 및 방향 접근)이 실행됩니다.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        /* Web Audio Sound Synthesizer */
+        class SoundManager {
+            constructor() {
+                this.ctx = null;
+                this.initialized = false;
+            }
+
+            init() {
+                if (this.initialized) return;
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) {
+                        this.ctx = new AudioCtx();
+                        this.initialized = true;
+                    }
+                } catch (e) {
+                    console.warn("Audio Context init error", e);
+                }
+            }
+
+            playBounce() {
+                if (!this.ctx) return;
+                try {
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(280, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(80, this.ctx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.1);
+                } catch(e){}
+            }
+
+            playCollect() {
+                if (!this.ctx) return;
+                try {
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.setValueAtTime(659.25, now + 0.08);
+                    osc.frequency.setValueAtTime(783.99, now + 0.16);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(now + 0.25);
+                } catch(e){}
+            }
+
+            playWin() {
+                if (!this.ctx) return;
+                try {
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const notes = [523.25, 659.25, 783.99, 1046.50];
+                    notes.forEach((freq, idx) => {
+                        const osc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.value = freq;
+                        gain.gain.setValueAtTime(0.2, this.ctx.currentTime + idx * 0.09);
+                        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + idx * 0.09 + 0.25);
+                        osc.connect(gain);
+                        gain.connect(this.ctx.destination);
+                        osc.start(this.ctx.currentTime + idx * 0.09);
+                        osc.stop(this.ctx.currentTime + idx * 0.09 + 0.25);
+                    });
+                } catch(e){}
+            }
+
+            playFall() {
+                if (!this.ctx) return;
+                try {
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(260, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.35);
+                    gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.35);
+                } catch(e){}
+            }
+        }
+
+        const sound = new SoundManager();
+
+        class SensorManager {
+            constructor() {
+                this.gamma = 0; // X tilt
+                this.beta = 0;  // Y tilt
+                
+                this.calibGamma = 0;
+                this.calibBeta = 25;
+                this.isCalibrated = false;
+                
+                this.hasGyro = false;
+                this.isListening = false;
+                this.eventReceivedCount = 0;
+                this.sensorSource = 'none';
+
+                this.runDiagnostics();
+            }
+
+            runDiagnostics() {
+                const isHttps = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                const ua = navigator.userAgent || '';
+                const isInApp = /KAKAOTALK|NAVER|Line|Instagram|FB_IAB/i.test(ua);
+                const isIOS = /iPhone|iPad|iPod/i.test(ua);
+                const hasPermissionAPI = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
+
+                const httpsElem = document.getElementById('diag-https');
+                const browserElem = document.getElementById('diag-browser');
+                const iosElem = document.getElementById('diag-ios');
+                const warningElem = document.getElementById('diag-warning');
+                const statusElem = document.getElementById('diag-status');
+
+                if (httpsElem) {
+                    httpsElem.innerText = isHttps ? '양호 (HTTPS)' : '불가 (HTTP)';
+                    httpsElem.className = isHttps ? 'font-mono font-bold text-emerald-400' : 'font-mono font-bold text-rose-400';
+                }
+
+                if (browserElem) {
+                    browserElem.innerText = isInApp ? '인앱 브라우저 감지됨' : (isIOS ? 'Safari / iOS' : '일반 브라우저');
+                    browserElem.className = isInApp ? 'font-mono font-bold text-amber-400' : 'font-mono font-bold text-emerald-400';
+                }
+
+                if (iosElem) {
+                    iosElem.innerText = hasPermissionAPI ? '필요 (클릭 승인)' : '자동 감지 방식';
+                    iosElem.className = 'font-mono font-bold text-cyan-300';
+                }
+
+                if (!isHttps || isInApp) {
+                    if (warningElem) warningElem.classList.remove('hidden');
+                    if (statusElem) {
+                        statusElem.innerText = '환경 제한됨';
+                        statusElem.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300';
+                    }
+                } else {
+                    if (statusElem) {
+                        statusElem.innerText = '정상 준비됨';
+                        statusElem.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300';
+                    }
+                }
+            }
+
+            async requestGyroPermission() {
+                sound.init();
+                this.eventReceivedCount = 0;
+
+                // iOS 13+ Modern Safari DeviceOrientation Permission Request
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    try {
+                        const response = await DeviceOrientationEvent.requestPermission();
+                        if (response === 'granted') {
+                            this.startListening();
+                            this.showToast("자이로 센서 권한이 승인되었습니다!");
+                        } else {
+                            this.showToast("권한이 거부되었습니다. 아이폰 설정 > Safari에서 동작 접근을 허용하세요.");
+                        }
+                    } catch (e) {
+                        console.warn("DeviceOrientation request error:", e);
+                        this.startListening();
+                    }
+                } else {
+                    // Android Chrome and Standard Browsers
+                    this.startListening();
+                    this.showToast("자이로 센서 감지를 시작합니다.");
+                }
+
+                // Check after 1s if valid gyro signals arrived
+                setTimeout(() => {
+                    if (this.eventReceivedCount === 0 && !this.hasGyro) {
+                        const label = document.getElementById('sensor-active-label');
+                        if (label) {
+                            label.innerText = '센서 신호 없음 (HTTPS/브라우저 확인)';
+                            label.className = 'text-[9px] text-rose-400 font-sans mt-0.5 font-bold';
+                        }
+                        this.showToast("센서 신호가 없습니다. HTTPS 접속 또는 Safari/Chrome을 이용하세요.");
+                    }
+                }, 1000);
+            }
+
+            showToast(msg) {
+                const toast = document.createElement('div');
+                toast.className = 'fixed top-5 left-1/2 -translate-x-1/2 z-50 glass-panel px-4 py-2 rounded-full border border-cyan-400/50 text-cyan-300 text-xs font-bold shadow-xl animate-bounce pointer-events-none text-center max-w-[90%]';
+                toast.innerText = msg;
+                document.body.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.transition = 'opacity 0.4s ease';
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 400);
+                }, 2800);
+            }
+
+            startListening() {
+                if (this.isListening) return;
+
+                const processOrientation = (g, b, sourceName) => {
+                    if (g === null || b === null || isNaN(g) || isNaN(b)) return;
+                    this.eventReceivedCount++;
+                    this.hasGyro = true;
+                    this.sensorSource = sourceName;
+
+                    if (!this.isCalibrated) {
+                        this.calibGamma = g;
+                        this.calibBeta = b;
+                        this.isCalibrated = true;
+                    }
+
+                    const alpha = 0.35;
+                    this.gamma = this.gamma * (1 - alpha) + g * alpha;
+                    this.beta = this.beta * (1 - alpha) + b * alpha;
+
+                    const label = document.getElementById('sensor-active-label');
+                    if (label) {
+                        label.innerText = `자이로 작동중 (${sourceName})`;
+                        label.className = 'text-[9px] text-emerald-400 font-sans mt-0.5';
+                    }
+                    this.updateLevelIndicator();
+                };
+
+                window.addEventListener('deviceorientation', (e) => {
+                    if (e.gamma !== null) {
+                        processOrientation(e.gamma, e.beta, 'Orientation');
+                    }
+                }, true);
+
+                window.addEventListener('deviceorientationabsolute', (e) => {
+                    if (!this.hasGyro && e.gamma !== null) {
+                        processOrientation(e.gamma, e.beta, 'Absolute');
+                    }
+                }, true);
+
+                window.addEventListener('devicemotion', (e) => {
+                    if (e.accelerationIncludingGravity) {
+                        const acc = e.accelerationIncludingGravity;
+                        if (acc.x !== null && acc.y !== null && !isNaN(acc.x) && !this.hasGyro) {
+                            const mappedGamma = acc.x * 6;
+                            const mappedBeta = -acc.y * 6;
+                            processOrientation(mappedGamma, mappedBeta, 'Motion');
+                        }
+                    }
+                }, true);
+
+                this.isListening = true;
+            }
+
+            calibrateZero() {
+                this.calibGamma = this.gamma;
+                this.calibBeta = this.beta;
+                this.isCalibrated = true;
+                if (navigator.vibrate) navigator.vibrate(50);
+            }
+
+            getTilt() {
+                let g = this.gamma - this.calibGamma;
+                let b = this.beta - this.calibBeta;
+
+                const maxTiltAngle = 18;
+                let tx = Math.max(-1, Math.min(1, g / maxTiltAngle));
+                let ty = Math.max(-1, Math.min(1, b / maxTiltAngle));
+
+                if (Math.abs(tx) < 0.02) tx = 0;
+                if (Math.abs(ty) < 0.02) ty = 0;
+
+                return { x: tx, y: ty };
+            }
+
+            updateLevelIndicator() {
+                const bubble = document.getElementById('level-bubble');
+                const valG = document.getElementById('val-gamma');
+                const valB = document.getElementById('val-beta');
+                const valCount = document.getElementById('val-count');
+
+                if (!bubble) return;
+
+                const tilt = this.getTilt();
+                const posX = tilt.x * 14;
+                const posY = tilt.y * 14;
+
+                bubble.style.transform = `translate(${posX}px, ${posY}px)`;
+                if (valG) valG.innerText = `${Math.round(this.gamma - this.calibGamma)}°`;
+                if (valB) valB.innerText = `${Math.round(this.beta - this.calibBeta)}°`;
+                if (valCount) valCount.innerText = `${this.eventReceivedCount}회`;
+            }
+        }
+
+        const sensorManager = new SensorManager();
+
+        // Virtual Joystick Logic
+        function setupVirtualJoystick() {
+            const base = document.getElementById('joystick-base');
+            const stick = document.getElementById('joystick-stick');
+            if (!base || !stick) return;
+
+            let activeTouchId = null;
+            let baseRect = null;
+
+            const handleStart = (e) => {
+                const touch = e.touches ? e.touches[0] : e;
+                activeTouchId = touch.identifier !== undefined ? touch.identifier : 'mouse';
+                baseRect = base.getBoundingClientRect();
+                handleMove(e);
+            };
+
+            const handleMove = (e) => {
+                if (activeTouchId === null) return;
+
+                let touch = null;
+                if (e.touches) {
+                    for (let i = 0; i < e.touches.length; i++) {
+                        if (e.touches[i].identifier === activeTouchId) {
+                            touch = e.touches[i];
+                            break;
+                        }
+                    }
+                } else {
+                    touch = e;
+                }
+
+                if (!touch || !baseRect) return;
+
+                const centerX = baseRect.left + baseRect.width / 2;
+                const centerY = baseRect.top + baseRect.height / 2;
+
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const maxRadius = baseRect.width / 2 - 10;
+
+                const distance = Math.hypot(dx, dy);
+                if (distance > maxRadius) {
+                    dx = (dx / distance) * maxRadius;
+                    dy = (dy / distance) * maxRadius;
+                }
+
+                stick.style.transform = `translate(${dx}px, ${dy}px)`;
+
+                sensorManager.joystickDirection.x = dx / maxRadius;
+                sensorManager.joystickDirection.y = dy / maxRadius;
+                sensorManager.updateLevelIndicator();
+            };
+
+            const handleEnd = () => {
+                activeTouchId = null;
+                stick.style.transform = `translate(0px, 0px)`;
+                sensorManager.joystickDirection.x = 0;
+                sensorManager.joystickDirection.y = 0;
+                sensorManager.updateLevelIndicator();
+            };
+
+            base.addEventListener('touchstart', handleStart, { passive: true });
+            window.addEventListener('touchmove', handleMove, { passive: true });
+            window.addEventListener('touchend', handleEnd);
+            window.addEventListener('touchcancel', handleEnd);
+
+            base.addEventListener('mousedown', handleStart);
+            window.addEventListener('mousemove', handleMove);
+            window.addEventListener('mouseup', handleEnd);
+        }
+
+            async requestGyroPermission() {
+                sound.init();
+                
+                this.forceTouchMode = false;
+                this.eventReceivedCount = 0;
+                this.updateModeUI();
+
+                // iOS / Modern Browsers DeviceOrientation Permission Request
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    try {
+                        // Direct call during user gesture
+                        const response = await DeviceOrientationEvent.requestPermission();
+                        if (response === 'granted') {
+                            this.startListening();
+                            this.showToast("자이로 센서 권한이 승인되었습니다!");
+                        } else {
+                            this.enableTouchFallback("자이로 권한이 거부되었습니다.");
+                            this.showToast("센서 권한이 거부되었습니다. 터치 모드로 전환됩니다.");
+                        }
+                    } catch (e) {
+                        console.warn("DeviceOrientation request error:", e);
+                        this.startListening();
+                    }
+                } else {
+                    // Android Chrome and other browsers
+                    this.startListening();
+                    this.showToast("자이로 센서 감지를 시작합니다.");
+                }
+
+                setTimeout(() => {
+                    if (this.eventReceivedCount === 0 && !this.hasGyro) {
+                        const label = document.getElementById('sensor-active-label');
+                        if (label && !this.forceTouchMode) {
+                            label.innerText = '센서 미감지 (터치/드래그 가능)';
+                            label.className = 'text-[9px] text-amber-400 font-sans mt-0.5';
+                        }
+                    }
+                }, 1200);
+            }
+
+            showToast(msg) {
+                const toast = document.createElement('div');
+                toast.className = 'fixed top-5 left-1/2 -translate-x-1/2 z-50 glass-panel px-4 py-2 rounded-full border border-cyan-400/50 text-cyan-300 text-xs font-bold shadow-xl animate-bounce pointer-events-none';
+                toast.innerText = msg;
+                document.body.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.transition = 'opacity 0.4s ease';
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 400);
+                }, 2200);
+            }
+
+            startListening() {
+                if (this.isListening) return;
+
+                const processOrientation = (g, b, sourceName) => {
+                    if (g === null || b === null || isNaN(g) || isNaN(b)) return;
+                    this.eventReceivedCount++;
+                    this.hasGyro = true;
+                    this.sensorSource = sourceName;
+
+                    if (!this.isCalibrated) {
+                        this.calibGamma = g;
+                        this.calibBeta = b;
+                        this.isCalibrated = true;
+                    }
+
+                    const alpha = 0.35;
+                    this.gamma = this.gamma * (1 - alpha) + g * alpha;
+                    this.beta = this.beta * (1 - alpha) + b * alpha;
+
+                    const label = document.getElementById('sensor-active-label');
+                    if (label && !this.forceTouchMode) {
+                        label.innerText = `자이로 연결됨 (${sourceName})`;
+                        label.className = 'text-[9px] text-emerald-400 font-sans mt-0.5';
+                    }
+                    this.updateLevelIndicator();
+                };
+
+                window.addEventListener('deviceorientation', (e) => {
+                    if (!this.forceTouchMode && e.gamma !== null) {
+                        processOrientation(e.gamma, e.beta, 'Orientation');
+                    }
+                }, true);
+
+                window.addEventListener('deviceorientationabsolute', (e) => {
+                    if (!this.forceTouchMode && !this.hasGyro && e.gamma !== null) {
+                        processOrientation(e.gamma, e.beta, 'Absolute');
+                    }
+                }, true);
+
+                window.addEventListener('devicemotion', (e) => {
+                    if (!this.forceTouchMode && e.accelerationIncludingGravity) {
+                        const acc = e.accelerationIncludingGravity;
+                        if (acc.x !== null && acc.y !== null && !isNaN(acc.x) && !this.hasGyro) {
+                            const mappedGamma = acc.x * 6;
+                            const mappedBeta = -acc.y * 6;
+                            processOrientation(mappedGamma, mappedBeta, 'Motion');
+                        }
+                    }
+                }, true);
+
+                this.isListening = true;
+            }
+
+            enableTouchFallback(reason) {
+                this.forceTouchMode = true;
+                this.updateModeUI();
+            }
+
+            toggleControlMode() {
+                this.forceTouchMode = !this.forceTouchMode;
+                if (!this.forceTouchMode) {
+                    this.requestGyroPermission();
+                } else {
+                    this.updateModeUI();
+                }
+            }
+
+            updateModeUI() {
+                const modeText = document.getElementById('mode-text');
+                const modeIcon = document.getElementById('mode-icon');
+                const label = document.getElementById('sensor-active-label');
+
+                if (this.forceTouchMode) {
+                    if (modeText) modeText.innerText = '터치/드래그 모드';
+                    if (modeIcon) modeIcon.className = 'fa-solid fa-hand-pointer text-amber-400';
+                    if (label) {
+                        label.innerText = '터치/드래그 제어중';
+                        label.className = 'text-[9px] text-amber-400 font-sans mt-0.5';
+                    }
+                } else {
+                    if (modeText) modeText.innerText = '자이로 센서';
+                    if (modeIcon) modeIcon.className = 'fa-solid fa-mobile-screen text-cyan-400';
+                    if (label) {
+                        label.innerText = this.hasGyro ? '자이로 센서 작동중' : '자이로 감지 대기중...';
+                        label.className = this.hasGyro ? 'text-[9px] text-emerald-400 font-sans mt-0.5' : 'text-[9px] text-cyan-300 font-sans mt-0.5';
+                    }
+                }
+            }
+
+            calibrateZero() {
+                this.calibGamma = this.gamma;
+                this.calibBeta = this.beta;
+                this.isCalibrated = true;
+                if (navigator.vibrate) navigator.vibrate(50);
+            }
+
+            getTilt() {
+                if (this.forceTouchMode || (!this.hasGyro && this.eventReceivedCount === 0)) {
+                    let tx = this.touchDirection.x;
+                    let ty = this.touchDirection.y;
+
+                    if (this.keys.Left) tx = -0.9;
+                    if (this.keys.Right) tx = 0.9;
+                    if (this.keys.Up) ty = -0.9;
+                    if (this.keys.Down) ty = 0.9;
+
+                    return { x: tx, y: ty };
+                }
+
+                let g = this.gamma - this.calibGamma;
+                let b = this.beta - this.calibBeta;
+
+                const maxTiltAngle = 18;
+                let tx = Math.max(-1, Math.min(1, g / maxTiltAngle));
+                let ty = Math.max(-1, Math.min(1, b / maxTiltAngle));
+
+                if (Math.abs(tx) < 0.02) tx = 0;
+                if (Math.abs(ty) < 0.02) ty = 0;
+
+                return { x: tx, y: ty };
+            }
+
+            updateLevelIndicator() {
+                const bubble = document.getElementById('level-bubble');
+                const valG = document.getElementById('val-gamma');
+                const valB = document.getElementById('val-beta');
+                const valCount = document.getElementById('val-count');
+
+                if (!bubble) return;
+
+                const tilt = this.getTilt();
+                const posX = tilt.x * 14;
+                const posY = tilt.y * 14;
+
+                bubble.style.transform = `translate(${posX}px, ${posY}px)`;
+                if (valG) valG.innerText = `${Math.round(this.gamma - this.calibGamma)}°`;
+                if (valB) valB.innerText = `${Math.round(this.beta - this.calibBeta)}°`;
+                if (valCount) valCount.innerText = `${this.eventReceivedCount}회`;
+            }
+        }
+
+        const sensorManager = new SensorManager();
+
+        const STAGE_DATA = [
+            {
+                id: 1,
+                name: "시작의 길",
+                desc: "기기 각도를 틀어 공을 목적지까지 굴려보세요.",
+                ballStart: { x: 0.5, y: 0.15 },
+                portal: { x: 0.5, y: 0.85, r: 24 },
+                gems: [{ x: 0.5, y: 0.35 }, { x: 0.3, y: 0.5 }, { x: 0.7, y: 0.65 }],
+                walls: [
+                    { x: 0.1, y: 0.08, w: 0.8, h: 0.02 },
+                    { x: 0.1, y: 0.08, w: 0.02, h: 0.84 },
+                    { x: 0.88, y: 0.08, w: 0.02, h: 0.84 },
+                    { x: 0.1, y: 0.92, w: 0.8, h: 0.02 },
+                    { x: 0.1, y: 0.4, w: 0.5, h: 0.02 },
+                    { x: 0.4, y: 0.6, w: 0.5, h: 0.02 }
+                ],
+                hazards: [],
+                bumpers: []
+            },
+            {
+                id: 2,
+                name: "바운스 핀볼",
+                desc: "탄성 고무 벽을 이용하여 함정을 피하세요.",
+                ballStart: { x: 0.2, y: 0.15 },
+                portal: { x: 0.8, y: 0.85, r: 24 },
+                gems: [{ x: 0.8, y: 0.15 }, { x: 0.5, y: 0.5 }, { x: 0.2, y: 0.85 }],
+                walls: [
+                    { x: 0.05, y: 0.08, w: 0.9, h: 0.02 },
+                    { x: 0.05, y: 0.08, w: 0.02, h: 0.84 },
+                    { x: 0.93, y: 0.08, w: 0.02, h: 0.84 },
+                    { x: 0.05, y: 0.92, w: 0.9, h: 0.02 }
+                ],
+                hazards: [
+                    { x: 0.5, y: 0.3, r: 22, type: 'hole' },
+                    { x: 0.5, y: 0.7, r: 22, type: 'hole' }
+                ],
+                bumpers: [
+                    { x: 0.3, y: 0.5, r: 20 },
+                    { x: 0.7, y: 0.5, r: 20 }
+                ]
+            },
+            {
+                id: 3,
+                name: "블랙홀 주의",
+                desc: "공을 강력하게 끌어당기는 블랙홀 중력장을 피하세요.",
+                ballStart: { x: 0.5, y: 0.1 },
+                portal: { x: 0.5, y: 0.9, r: 24 },
+                gems: [{ x: 0.2, y: 0.3 }, { x: 0.8, y: 0.5 }, { x: 0.2, y: 0.7 }],
+                walls: [
+                    { x: 0.05, y: 0.05, w: 0.9, h: 0.02 },
+                    { x: 0.05, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.93, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.05, y: 0.95, w: 0.9, h: 0.02 },
+                    { x: 0.2, y: 0.4, w: 0.6, h: 0.02 }
+                ],
+                hazards: [
+                    { x: 0.5, y: 0.25, r: 18, type: 'blackhole', pullRadius: 120 },
+                    { x: 0.5, y: 0.65, r: 18, type: 'blackhole', pullRadius: 120 }
+                ],
+                bumpers: []
+            },
+            {
+                id: 4,
+                name: "빙판 존과 끈적이",
+                desc: "미끄러운 얼음 구역과 속도가 줄어드는 끈적이 구역입니다.",
+                ballStart: { x: 0.15, y: 0.15 },
+                portal: { x: 0.85, y: 0.85, r: 24 },
+                gems: [{ x: 0.5, y: 0.2 }, { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.8 }],
+                walls: [
+                    { x: 0.05, y: 0.05, w: 0.9, h: 0.02 },
+                    { x: 0.05, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.93, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.05, y: 0.95, w: 0.9, h: 0.02 }
+                ],
+                zones: [
+                    { x: 0.1, y: 0.3, w: 0.8, h: 0.2, type: 'ice' },
+                    { x: 0.1, y: 0.6, w: 0.8, h: 0.2, type: 'sticky' }
+                ],
+                hazards: [],
+                bumpers: []
+            },
+            {
+                id: 5,
+                name: "움직이는 레이저",
+                desc: "왕복하는 장애물 레이저의 타이밍을 맞추세요.",
+                ballStart: { x: 0.5, y: 0.1 },
+                portal: { x: 0.5, y: 0.9, r: 24 },
+                gems: [{ x: 0.5, y: 0.35 }, { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.65 }],
+                walls: [
+                    { x: 0.05, y: 0.05, w: 0.9, h: 0.02 },
+                    { x: 0.05, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.93, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.05, y: 0.95, w: 0.9, h: 0.02 }
+                ],
+                movingHazards: [
+                    { x: 0.1, y: 0.3, w: 0.4, h: 0.03, vx: 2, rangeMin: 0.1, rangeMax: 0.5 },
+                    { x: 0.5, y: 0.5, w: 0.4, h: 0.03, vx: -2.5, rangeMin: 0.1, rangeMax: 0.5 },
+                    { x: 0.1, y: 0.7, w: 0.4, h: 0.03, vx: 3, rangeMin: 0.1, rangeMax: 0.5 }
+                ],
+                hazards: [],
+                bumpers: []
+            },
+            {
+                id: 6,
+                name: "낙하하는 혜성 볼",
+                desc: "위에서 끊임없이 떨어지는 위성 장애물 공을 요리조리 피하세요!",
+                ballStart: { x: 0.5, y: 0.1 },
+                portal: { x: 0.5, y: 0.9, r: 24 },
+                gems: [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.5 }, { x: 0.3, y: 0.7 }],
+                walls: [
+                    { x: 0.05, y: 0.05, w: 0.9, h: 0.02 },
+                    { x: 0.05, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.93, y: 0.05, w: 0.02, h: 0.9 },
+                    { x: 0.05, y: 0.95, w: 0.9, h: 0.02 },
+                    { x: 0.3, y: 0.4, w: 0.4, h: 0.02 }
+                ],
+                fallingBallSpawners: [
+                    { x: 0.2, y: 0.06, speed: 3.5, r: 12, interval: 1200 },
+                    { x: 0.5, y: 0.06, speed: 4.2, r: 14, interval: 900 },
+                    { x: 0.8, y: 0.06, speed: 3.8, r: 13, interval: 1100 }
+                ],
+                hazards: [],
+                bumpers: []
+            }
+        ];
+
+        class GyroBallGame {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                
+                this.width = 0;
+                this.height = 0;
+                
+                this.currentStageIndex = 0;
+                this.stageData = null;
+
+                this.isRunning = false;
+                this.isPaused = false;
+
+                this.ball = {
+                    x: 0,
+                    y: 0,
+                    vx: 0,
+                    vy: 0,
+                    radius: 14,
+                    friction: 0.98,
+                    hasMagnet: false
+                };
+
+                this.fallingBalls = [];
+                this.particles = [];
+                this.collectedGemsCount = 0;
+                this.totalGemsCount = 0;
+                this.hasKey = false;
+
+                this.startTime = 0;
+                this.elapsedSeconds = 0;
+                this.timerInterval = null;
+
+                this.initCanvasSize();
+                window.addEventListener('resize', () => this.initCanvasSize());
+            }
+
+            initCanvasSize() {
+                const container = document.getElementById('game-container');
+                this.width = container.clientWidth || window.innerWidth;
+                this.height = container.clientHeight || window.innerHeight;
+                this.canvas.width = this.width;
+                this.canvas.height = this.height;
+            }
+
+            loadStage(index) {
+                this.currentStageIndex = index;
+                this.stageData = JSON.parse(JSON.stringify(STAGE_DATA[index]));
+                
+                this.ball.x = this.stageData.ballStart.x * this.width;
+                this.ball.y = this.stageData.ballStart.y * this.height;
+                this.ball.vx = 0;
+                this.ball.vy = 0;
+                this.ball.hasMagnet = false;
+
+                this.fallingBalls = [];
+                this.collectedGemsCount = 0;
+                this.totalGemsCount = this.stageData.gems ? this.stageData.gems.length : 0;
+                this.hasKey = false;
+                this.particles = [];
+
+                this.startTimer();
+                this.updateHUD();
+            }
+
+            startTimer() {
+                clearInterval(this.timerInterval);
+                this.startTime = Date.now();
+                this.elapsedSeconds = 0;
+                this.timerInterval = setInterval(() => {
+                    if (this.isRunning && !this.isPaused) {
+                        this.elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000);
+                        const mins = String(Math.floor(this.elapsedSeconds / 60)).padStart(2, '0');
+                        const secs = String(this.elapsedSeconds % 60).padStart(2, '0');
+                        document.getElementById('hud-timer').innerText = `${mins}:${secs}`;
+                    }
+                }, 1000);
+            }
+
+            updateHUD() {
+                document.getElementById('hud-level-tag').innerText = `STAGE ${String(this.currentStageIndex + 1).padStart(2, '0')}`;
+                document.getElementById('hud-gems').innerText = `${this.collectedGemsCount}/${this.totalGemsCount}`;
+            }
+
+            updatePhysics() {
+                if (!this.isRunning || this.isPaused) return;
+
+                const tilt = sensorManager.getTilt();
+                const force = 0.88;
+
+                if (this.canvas) {
+                    const rotX = -tilt.y * 14;
+                    const rotY = tilt.x * 14;
+                    this.canvas.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+                }
+
+                this.ball.vx += tilt.x * force;
+                this.ball.vy += tilt.y * force;
+
+                const maxSpeed = 18;
+                const currentSpeed = Math.hypot(this.ball.vx, this.ball.vy);
+                if (currentSpeed > maxSpeed) {
+                    this.ball.vx = (this.ball.vx / currentSpeed) * maxSpeed;
+                    this.ball.vy = (this.ball.vy / currentSpeed) * maxSpeed;
+                }
+
+                let currentFriction = this.ball.friction;
+                if (this.stageData.zones) {
+                    this.stageData.zones.forEach(z => {
+                        const zx = z.x * this.width;
+                        const zy = z.y * this.height;
+                        const zw = z.w * this.width;
+                        const zh = z.h * this.height;
+
+                        if (this.ball.x > zx && this.ball.x < zx + zw && this.ball.y > zy && this.ball.y < zy + zh) {
+                            if (z.type === 'ice') currentFriction = 0.998;
+                            if (z.type === 'sticky') currentFriction = 0.82;
+                        }
+                    });
+                }
+
+                this.ball.vx *= currentFriction;
+                this.ball.vy *= currentFriction;
+
+                this.ball.x += this.ball.vx;
+                this.ball.y += this.ball.vy;
+
+                // Spawning & Updating Falling Hazard Balls
+                if (this.stageData.fallingBallSpawners) {
+                    const now = Date.now();
+                    this.stageData.fallingBallSpawners.forEach(spawner => {
+                        if (!spawner.lastSpawn || now - spawner.lastSpawn > spawner.interval) {
+                            spawner.lastSpawn = now;
+                            this.fallingBalls.push({
+                                x: spawner.x * this.width + (Math.random() - 0.5) * 30,
+                                y: spawner.y * this.height,
+                                vx: (Math.random() - 0.5) * 1.5,
+                                vy: spawner.speed || 3.5,
+                                r: spawner.r || 13
+                            });
+                        }
+                    });
+                }
+
+                for (let i = this.fallingBalls.length - 1; i >= 0; i--) {
+                    const fb = this.fallingBalls[i];
+                    fb.x += fb.vx + tilt.x * 0.4;
+                    fb.y += fb.vy + tilt.y * 0.2;
+
+                    // Collision check with player's ball
+                    const dist = Math.hypot(this.ball.x - fb.x, this.ball.y - fb.y);
+                    if (dist < this.ball.radius + fb.r) {
+                        this.triggerDefeat("떨어지는 장애물 공에 부딪혔습니다!");
+                        break;
+                    }
+
+                    // Remove when off-screen
+                    if (fb.y > this.height + 30 || fb.x < -30 || fb.x > this.width + 30) {
+                        this.fallingBalls.splice(i, 1);
+                    }
+                }
+
+                // Particle Trail
+                if (currentSpeed > 1) {
+                    this.particles.push({
+                        x: this.ball.x + (Math.random() - 0.5) * 6,
+                        y: this.ball.y + (Math.random() - 0.5) * 6,
+                        r: Math.random() * 4 + 2,
+                        alpha: 0.6
+                    });
+                }
+
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.alpha -= 0.03;
+                    p.r *= 0.95;
+                    if (p.alpha <= 0) this.particles.splice(i, 1);
+                }
+
+                // Wall Collisions
+                if (this.stageData.walls) {
+                    this.stageData.walls.forEach(w => {
+                        if (w.isGate && this.hasKey) return;
+
+                        const wx = w.x * this.width;
+                        const wy = w.y * this.height;
+                        const ww = w.w * this.width;
+                        const wh = w.h * this.height;
+
+                        const closestX = Math.max(wx, Math.min(this.ball.x, wx + ww));
+                        const closestY = Math.max(wy, Math.min(this.ball.y, wy + wh));
+
+                        const distX = this.ball.x - closestX;
+                        const distY = this.ball.y - closestY;
+                        const distance = Math.hypot(distX, distY);
+
+                        if (distance < this.ball.radius) {
+                            sound.playBounce();
+                            if (Math.abs(distX) > Math.abs(distY)) {
+                                this.ball.vx *= -0.7;
+                                this.ball.x = closestX + (distX > 0 ? this.ball.radius : -this.ball.radius);
+                            } else {
+                                this.ball.vy *= -0.7;
+                                this.ball.y = closestY + (distY > 0 ? this.ball.radius : -this.ball.radius);
+                            }
+                        }
+                    });
+                }
+
+                // Moving Hazards
+                if (this.stageData.movingHazards) {
+                    this.stageData.movingHazards.forEach(mh => {
+                        mh.x += mh.vx * 0.003;
+                        if (mh.x < mh.rangeMin || mh.x > mh.rangeMax) mh.vx *= -1;
+
+                        const wx = mh.x * this.width;
+                        const wy = mh.y * this.height;
+                        const ww = mh.w * this.width;
+                        const wh = mh.h * this.height;
+
+                        const closestX = Math.max(wx, Math.min(this.ball.x, wx + ww));
+                        const closestY = Math.max(wy, Math.min(this.ball.y, wy + wh));
+
+                        if (Math.hypot(this.ball.x - closestX, this.ball.y - closestY) < this.ball.radius) {
+                            this.triggerDefeat("레이저 장애물에 부딪혔습니다!");
+                        }
+                    });
+                }
+
+                // Bumpers
+                if (this.stageData.bumpers) {
+                    this.stageData.bumpers.forEach(b => {
+                        const bx = b.x * this.width;
+                        const by = b.y * this.height;
+                        const dist = Math.hypot(this.ball.x - bx, this.ball.y - by);
+
+                        if (dist < this.ball.radius + b.r) {
+                            sound.playBounce();
+                            const angle = Math.atan2(this.ball.y - by, this.ball.x - bx);
+                            const bounceForce = 12;
+                            this.ball.vx = Math.cos(angle) * bounceForce;
+                            this.ball.vy = Math.sin(angle) * bounceForce;
+                        }
+                    });
+                }
+
+                // Hazards (Blackholes & Holes)
+                if (this.stageData.hazards) {
+                    this.stageData.hazards.forEach(h => {
+                        const hx = h.x * this.width;
+                        const hy = h.y * this.height;
+                        const dist = Math.hypot(this.ball.x - hx, this.ball.y - hy);
+
+                        if (h.type === 'blackhole' && h.pullRadius && dist < h.pullRadius) {
+                            const pull = (1 - dist / h.pullRadius) * 0.8;
+                            const angle = Math.atan2(hy - this.ball.y, hx - this.ball.x);
+                            this.ball.vx += Math.cos(angle) * pull;
+                            this.ball.vy += Math.sin(angle) * pull;
+                        }
+
+                        if (dist < h.r) {
+                            this.triggerDefeat("함정에 빠졌습니다!");
+                        }
+                    });
+                }
+
+                // Gems Collection
+                if (this.stageData.gems) {
+                    this.stageData.gems.forEach(g => {
+                        if (!g.collected) {
+                            const gx = g.x * this.width;
+                            const gy = g.y * this.height;
+                            const dist = Math.hypot(this.ball.x - gx, this.ball.y - gy);
+
+                            if (dist < this.ball.radius + 12) {
+                                g.collected = true;
+                                this.collectedGemsCount++;
+                                sound.playCollect();
+                                this.updateHUD();
+                            }
+                        }
+                    });
+                }
+
+                // Portal Arrival
+                if (this.stageData.portal) {
+                    const p = this.stageData.portal;
+                    if (Math.hypot(this.ball.x - p.x * this.width, this.ball.y - p.y * this.height) < p.r) {
+                        this.triggerClear();
+                    }
+                }
+            }
+
+            triggerClear() {
+                this.isRunning = false;
+                sound.playWin();
+                clearInterval(this.timerInterval);
+
+                const resultModal = document.getElementById('modal-result');
+                document.getElementById('result-title').innerText = "STAGE CLEAR!";
+                document.getElementById('result-title').className = "text-2xl font-black font-orbitron text-cyan-400";
+                document.getElementById('result-subtitle').innerText = "성공적으로 포탈에 도달했습니다.";
+                document.getElementById('result-icon-box').className = "w-16 h-16 rounded-full mx-auto flex items-center justify-center text-3xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/40";
+                document.getElementById('result-icon').className = "fa-solid fa-trophy";
+
+                document.getElementById('result-time').innerText = document.getElementById('hud-timer').innerText;
+                document.getElementById('result-gems').innerText = `${this.collectedGemsCount} / ${this.totalGemsCount}`;
+
+                document.getElementById('btn-next-stage').classList.remove('hidden');
+                resultModal.classList.remove('hidden');
+            }
+
+            triggerDefeat(reason) {
+                this.isRunning = false;
+                sound.playFall();
+                clearInterval(this.timerInterval);
+
+                const resultModal = document.getElementById('modal-result');
+                document.getElementById('result-title').innerText = "GAME OVER";
+                document.getElementById('result-title').className = "text-2xl font-black font-orbitron text-rose-500";
+                document.getElementById('result-subtitle').innerText = reason || "미션에 실패했습니다.";
+                document.getElementById('result-icon-box').className = "w-16 h-16 rounded-full mx-auto flex items-center justify-center text-3xl bg-rose-500/20 text-rose-400 border border-rose-500/40";
+                document.getElementById('result-icon').className = "fa-solid fa-skull";
+
+                document.getElementById('result-time').innerText = document.getElementById('hud-timer').innerText;
+                document.getElementById('result-gems').innerText = `${this.collectedGemsCount} / ${this.totalGemsCount}`;
+
+                document.getElementById('btn-next-stage').classList.add('hidden');
+                resultModal.classList.remove('hidden');
+            }
+
+            draw() {
+                this.ctx.fillStyle = '#0b0f19';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+
+                if (!this.stageData) return;
+
+                // Grid background
+                this.ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+                this.ctx.lineWidth = 1;
+                for (let x = 0; x < this.width; x += 32) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, 0);
+                    this.ctx.lineTo(x, this.height);
+                    this.ctx.stroke();
+                }
+                for (let y = 0; y < this.height; y += 32) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, y);
+                    this.ctx.lineTo(this.width, y);
+                    this.ctx.stroke();
+                }
+
+                // Render Falling Hazard Balls
+                this.fallingBalls.forEach(fb => {
+                    this.ctx.beginPath();
+                    this.ctx.arc(fb.x, fb.y, fb.r, 0, Math.PI * 2);
+                    const grad = this.ctx.createRadialGradient(
+                        fb.x - 3, fb.y - 3, 1,
+                        fb.x, fb.y, fb.r
+                    );
+                    grad.addColorStop(0, '#ffedd5');
+                    grad.addColorStop(0.5, '#f97316');
+                    grad.addColorStop(1, '#c2410c');
+                    this.ctx.fillStyle = grad;
+                    this.ctx.shadowColor = '#f97316';
+                    this.ctx.shadowBlur = 12;
+                    this.ctx.fill();
+                    this.ctx.shadowBlur = 0;
+                });
+
+                // Zones
+                if (this.stageData.zones) {
+                    this.stageData.zones.forEach(z => {
+                        const zx = z.x * this.width;
+                        const zy = z.y * this.height;
+                        const zw = z.w * this.width;
+                        const zh = z.h * this.height;
+
+                        this.ctx.fillStyle = z.type === 'ice' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(234, 179, 8, 0.15)';
+                        this.ctx.fillRect(zx, zy, zw, zh);
+                    });
+                }
+
+                // Hazards
+                if (this.stageData.hazards) {
+                    this.stageData.hazards.forEach(h => {
+                        const hx = h.x * this.width;
+                        const hy = h.y * this.height;
+
+                        if (h.pullRadius) {
+                            this.ctx.beginPath();
+                            this.ctx.arc(hx, hy, h.pullRadius, 0, Math.PI * 2);
+                            this.ctx.strokeStyle = 'rgba(168, 85, 247, 0.15)';
+                            this.ctx.stroke();
+                        }
+
+                        const grad = this.ctx.createRadialGradient(hx, hy, 2, hx, hy, h.r);
+                        grad.addColorStop(0, '#000000');
+                        grad.addColorStop(0.7, '#3b0764');
+                        grad.addColorStop(1, '#a855f7');
+
+                        this.ctx.beginPath();
+                        this.ctx.arc(hx, hy, h.r, 0, Math.PI * 2);
+                        this.ctx.fillStyle = grad;
+                        this.ctx.fill();
+                    });
+                }
+
+                // Walls
+                if (this.stageData.walls) {
+                    this.stageData.walls.forEach(w => {
+                        const wx = w.x * this.width;
+                        const wy = w.y * this.height;
+                        const ww = w.w * this.width;
+                        const wh = w.h * this.height;
+
+                        this.ctx.fillStyle = '#1e293b';
+                        this.ctx.strokeStyle = '#334155';
+                        this.ctx.lineWidth = 2;
+
+                        this.ctx.beginPath();
+                        this.ctx.roundRect(wx, wy, ww, wh, 4);
+                        this.ctx.fill();
+                        this.ctx.stroke();
+                    });
+                }
+
+                // Moving Hazards
+                if (this.stageData.movingHazards) {
+                    this.stageData.movingHazards.forEach(mh => {
+                        this.ctx.fillStyle = '#f43f5e';
+                        this.ctx.fillRect(mh.x * this.width, mh.y * this.height, mh.w * this.width, mh.h * this.height);
+                    });
+                }
+
+                // Bumpers
+                if (this.stageData.bumpers) {
+                    this.stageData.bumpers.forEach(b => {
+                        this.ctx.beginPath();
+                        this.ctx.arc(b.x * this.width, b.y * this.height, b.r, 0, Math.PI * 2);
+                        this.ctx.fillStyle = '#ec4899';
+                        this.ctx.fill();
+                    });
+                }
+
+                // Gems
+                if (this.stageData.gems) {
+                    this.stageData.gems.forEach(g => {
+                        if (!g.collected) {
+                            const gx = g.x * this.width;
+                            const gy = g.y * this.height;
+
+                            this.ctx.save();
+                            this.ctx.translate(gx, gy);
+                            this.ctx.rotate(Date.now() * 0.003);
+
+                            this.ctx.beginPath();
+                            const r = 10;
+                            this.ctx.moveTo(0, -r);
+                            this.ctx.lineTo(r, 0);
+                            this.ctx.lineTo(0, r);
+                            this.ctx.lineTo(-r, 0);
+                            this.ctx.closePath();
+
+                            this.ctx.fillStyle = '#fbbf24';
+                            this.ctx.fill();
+                            this.ctx.restore();
+                        }
+                    });
+                }
+
+                // Portal
+                if (this.stageData.portal) {
+                    const p = this.stageData.portal;
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x * this.width, p.y * this.height, p.r, 0, Math.PI * 2);
+                    this.ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
+                    this.ctx.strokeStyle = '#10b981';
+                    this.ctx.lineWidth = 4;
+                    this.ctx.fill();
+                    this.ctx.stroke();
+                }
+
+                // Particles
+                this.particles.forEach(p => {
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                    this.ctx.fillStyle = `rgba(6, 182, 212, ${p.alpha})`;
+                    this.ctx.fill();
+                });
+
+                // Ball
+                this.ctx.beginPath();
+                this.ctx.arc(this.ball.x, this.ball.y, this.ball.radius, 0, Math.PI * 2);
+                
+                const ballGrad = this.ctx.createRadialGradient(
+                    this.ball.x - 4, this.ball.y - 4, 2,
+                    this.ball.x, this.ball.y, this.ball.radius
+                );
+                ballGrad.addColorStop(0, '#67e8f9');
+                ballGrad.addColorStop(0.7, '#06b6d4');
+                ballGrad.addColorStop(1, '#0e7490');
+
+                this.ctx.fillStyle = ballGrad;
+                this.ctx.shadowColor = '#06b6d4';
+                this.ctx.shadowBlur = 12;
+                this.ctx.fill();
+                this.ctx.shadowBlur = 0;
+            }
+
+            loop() {
+                this.updatePhysics();
+                this.draw();
+                requestAnimationFrame(() => this.loop());
+            }
+        }
+
+        window.addEventListener('load', () => {
+            const game = new GyroBallGame();
+            game.loop();
+            setupVirtualJoystick();
+
+            // Copy URL Helper
+            const btnCopyUrl = document.getElementById('btn-copy-url');
+            if (btnCopyUrl) {
+                btnCopyUrl.onclick = () => {
+                    const textToCopy = window.location.href;
+                    if (navigator.clipboard && window.isSecureContext) {
+                        navigator.clipboard.writeText(textToCopy);
+                    } else {
+                        const textArea = document.createElement("textarea");
+                        textArea.value = textToCopy;
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                    }
+                    sensorManager.showToast("주소가 복사되었습니다! Chrome/Safari에 붙여넣어 접속하세요.");
+                };
+            }
+
+            const btnSwitchTouch = document.getElementById('btn-switch-touch');
+            if (btnSwitchTouch) {
+                btnSwitchTouch.onclick = () => {
+                    sensorManager.enableTouchFallback();
+                    document.getElementById('sensor-warning-banner').classList.add('hidden');
+                };
+            }
+
+            // Populate Stage Grid
+            const gridContainer = document.getElementById('stage-grid-container');
+            if (gridContainer) {
+                STAGE_DATA.forEach((stage, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'glass-panel p-3 rounded-xl border border-cyan-500/30 text-center hover:bg-cyan-500/20 active:scale-95 transition flex flex-col items-center justify-center';
+                    btn.innerHTML = `
+                        <span class="text-[10px] text-cyan-400 font-orbitron font-bold">STAGE ${String(idx + 1).padStart(2, '0')}</span>
+                        <span class="text-xs font-bold text-white mt-1">${stage.name}</span>
+                    `;
+                    btn.onclick = () => {
+                        document.getElementById('screen-stage-select').classList.add('hidden');
+                        game.loadStage(idx);
+                        game.isRunning = true;
+                    };
+                    gridContainer.appendChild(btn);
+                });
+            }
+
+            // Start Button Click
+            const startBtn = document.getElementById('btn-enable-gyro');
+            if (startBtn) {
+                startBtn.onclick = async () => {
+                    try {
+                        await sensorManager.requestGyroPermission();
+                    } catch (e) {
+                        console.warn("Sensor request caught:", e);
+                    }
+                    
+                    document.getElementById('screen-start').classList.add('hidden');
+                    document.getElementById('hud-header').classList.remove('opacity-0');
+                    document.getElementById('hud-bottom').classList.remove('opacity-0');
+
+                    setTimeout(() => {
+                        sensorManager.calibrateZero();
+                    }, 150);
+
+                    game.loadStage(0);
+                    game.isRunning = true;
+                };
+            }
+
+            // Mode Toggle
+            document.getElementById('btn-toggle-mode').onclick = () => {
+                sensorManager.toggleControlMode();
+            };
+
+            // Warning Banner Close
+            document.getElementById('btn-close-warning').onclick = () => {
+                document.getElementById('sensor-warning-banner').classList.add('hidden');
+            };
+
+            // Touch / Pointer Dragging Simulation
+            let isDragging = false;
+            let dragStartX = 0, dragStartY = 0;
+            const gameContainer = document.getElementById('game-container');
+
+            const handlePointerDown = (e) => {
+                isDragging = true;
+                dragStartX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+                dragStartY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+            };
+
+            const handlePointerMove = (e) => {
+                if (!isDragging) return;
+                const clientX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+                const clientY = e.clientY || (e.touches && e.touches[0].clientY) || 0;
+
+                const dx = (clientX - dragStartX) / 50;
+                const dy = (clientY - dragStartY) / 50;
+
+                sensorManager.touchDirection.x = Math.max(-1, Math.min(1, dx));
+                sensorManager.touchDirection.y = Math.max(-1, Math.min(1, dy));
+                sensorManager.updateLevelIndicator();
+            };
+
+            const handlePointerUp = () => {
+                isDragging = false;
+                sensorManager.touchDirection.x = 0;
+                sensorManager.touchDirection.y = 0;
+                sensorManager.updateLevelIndicator();
+            };
+
+            gameContainer.addEventListener('mousedown', handlePointerDown);
+            window.addEventListener('mousemove', handlePointerMove);
+            window.addEventListener('mouseup', handlePointerUp);
+
+            gameContainer.addEventListener('touchstart', handlePointerDown, { passive: true });
+            window.addEventListener('touchmove', handlePointerMove, { passive: true });
+            window.addEventListener('touchend', handlePointerUp);
+
+            // Calibrate Button
+            document.getElementById('btn-calibrate').onclick = () => {
+                sensorManager.calibrateZero();
+            };
+
+            // Pause Modal Controls
+            document.getElementById('btn-pause').onclick = () => {
+                game.isPaused = true;
+                document.getElementById('modal-pause').classList.remove('hidden');
+            };
+
+            document.getElementById('btn-resume').onclick = () => {
+                game.isPaused = false;
+                document.getElementById('modal-pause').classList.add('hidden');
+            };
+
+            document.getElementById('btn-recalibrate').onclick = () => {
+                sensorManager.calibrateZero();
+                game.isPaused = false;
+                document.getElementById('modal-pause').classList.add('hidden');
+            };
+
+            document.getElementById('btn-restart').onclick = () => {
+                document.getElementById('modal-pause').classList.add('hidden');
+                document.getElementById('modal-result').classList.add('hidden');
+                game.loadStage(game.currentStageIndex);
+                game.isPaused = false;
+                game.isRunning = true;
+            };
+
+            document.getElementById('btn-menu').onclick = () => {
+                document.getElementById('modal-pause').classList.add('hidden');
+                document.getElementById('screen-stage-select').classList.remove('hidden');
+            };
+
+            // Result Screen Actions
+            document.getElementById('btn-next-stage').onclick = () => {
+                document.getElementById('modal-result').classList.add('hidden');
+                if (game.currentStageIndex < STAGE_DATA.length - 1) {
+                    game.loadStage(game.currentStageIndex + 1);
+                    game.isRunning = true;
+                } else {
+                    document.getElementById('screen-stage-select').classList.remove('hidden');
+                }
+            };
+
+            document.getElementById('btn-retry-stage').onclick = () => {
+                document.getElementById('modal-result').classList.add('hidden');
+                game.loadStage(game.currentStageIndex);
+                game.isRunning = true;
+            };
+
+            document.getElementById('btn-result-menu').onclick = () => {
+                document.getElementById('modal-result').classList.add('hidden');
+                document.getElementById('screen-stage-select').classList.remove('hidden');
+            };
+
+            document.getElementById('btn-close-stage-select').onclick = () => {
+                document.getElementById('screen-stage-select').classList.add('hidden');
+            };
+
+            // Keyboard Arrow Key Fallback
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft' || e.key === 'a') sensorManager.keys.Left = true;
+                if (e.key === 'ArrowRight' || e.key === 'd') sensorManager.keys.Right = true;
+                if (e.key === 'ArrowUp' || e.key === 'w') sensorManager.keys.Up = true;
+                if (e.key === 'ArrowDown' || e.key === 's') sensorManager.keys.Down = true;
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (e.key === 'ArrowLeft' || e.key === 'a') sensorManager.keys.Left = false;
+                if (e.key === 'ArrowRight' || e.key === 'd') sensorManager.keys.Right = false;
+                if (e.key === 'ArrowUp' || e.key === 'w') sensorManager.keys.Up = false;
+                if (e.key === 'ArrowDown' || e.key === 's') sensorManager.keys.Down = false;
+            });
+        });
+    </script>
+</body>
+</html>
